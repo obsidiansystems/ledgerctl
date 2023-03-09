@@ -1,9 +1,8 @@
 import collections
 import colorsys
-import json
 import math
-import os
-from typing import Dict
+from abc import ABC, abstractmethod
+from typing import Dict, List, Optional
 
 from PIL import Image
 
@@ -22,9 +21,11 @@ def _image_to_packed_buffer(im: Image, palette: Dict, bits_per_pixel: int) -> by
     # Row first
     for row in range(height):
         for col in range(width):
-            # Return an index in the indexed colors list for indexed address spaces
-            # left to right
-            # Perform implicit rotation here (0,0) is left top in BAGL, and generally left bottom for various canvas
+            # Return an index in the indexed colors list for indexed address
+            # spaces left to right.
+            #
+            # Perform implicit rotation here (0,0) is left top in BAGL, and
+            # generally left bottom for various canvas.
             color_index = im.getpixel((col, row))
 
             # Remap index by luminance
@@ -63,7 +64,7 @@ def icon_from_file(image_file: str) -> bytes:
 
     # Reorder color map by luminance
     palette = im.getpalette()
-    opalette = {}
+    opalette: Dict[float, List] = {}
     for i in range(num_colors):
         red, green, blue = palette[3 * i : 3 * i + 3]
         hue, saturation, value = colorsys.rgb_to_hsv(
@@ -97,65 +98,55 @@ def icon_from_file(image_file: str) -> bytes:
     return header + image_data
 
 
-class AppManifest(object):
-    def __init__(self, filename):
-        with open(filename) as f:
-            self.path = os.path.dirname(filename)
-            self.json = json.load(f)
-            assert "targetId" in self.json and "binary" in self.json
+class AppManifest(ABC):
+    dic: Dict = {}
 
     @property
-    def app_name(self):
-        return self.json["name"]
+    def app_name(self) -> str:
+        return self.dic.get("name", "")
 
-    @property
-    def data_size(self):
-        if "dataSize" not in self.json:
-            return 0
-        else:
-            return self.json["dataSize"]
+    @abstractmethod
+    def data_size(self, device: str) -> int:
+        pass
 
-    def get_application_flags(self) -> int:
-        if "flags" not in self.json:
-            return 0
-        else:
-            return int(self.json["flags"], 16)
+    @abstractmethod
+    def get_application_flags(self, device: str) -> int:
+        pass
 
-    def get_binary(self) -> str:
-        return os.path.join(self.path, self.json["binary"])
+    @abstractmethod
+    def get_api_level(self, device: str) -> Optional[int]:
+        pass
 
-    def get_target_id(self) -> int:
-        return int(self.json["targetId"], 16)
+    @abstractmethod
+    def get_binary(self, device: str) -> str:
+        pass
 
-    def serialize_parameters(self) -> bytes:
-        parameters = []
-        for entry, value in self.json.items():
-            if entry == "name":
-                parameters.append({"type_": "BOLOS_TAG_APPNAME", "value": value})
-            elif entry == "version":
-                parameters.append({"type_": "BOLOS_TAG_APPVERSION", "value": value})
-            elif entry == "icon":
-                parameters.append(
-                    {"type_": "BOLOS_TAG_ICON", "value": icon_from_file(value)}
-                )
-            elif entry == "derivationPath":
-                derivation_paths = {"paths": None, "curve": None}
-                for derivation_entry in value:
-                    if derivation_entry == "curves":
-                        curves = 0
-                        for curve in value["curves"]:
-                            if curve == "secp256k1":
-                                curves |= params.CURVE_SECP256K1
-                            elif curve == "prime256r1":
-                                curves |= params.CURVE_PRIME256R1
-                            elif curve == "ed25519":
-                                curves |= params.CURVE_ED25519
-                            elif curve == "bls12381g1":
-                                curves |= params.CURVE_BLS12381G1
-                            derivation_paths["curve"] = curves
-                    elif derivation_entry == "paths":
-                        derivation_paths["paths"] = value["paths"]
-                parameters.append(
-                    {"type_": "BOLOS_TAG_DERIVEPATH", "value": derivation_paths}
-                )
-        return params.AppParams.build(parameters)
+    @abstractmethod
+    def serialize_parameters(self, device: str) -> bytes:
+        pass
+
+    @abstractmethod
+    def assert_compatible_device(self, device_id: int):
+        pass
+
+    def serialize_derivation_path(self, value):
+        derivation_paths: Dict[str, Optional[int]] = {
+            "paths": None,
+            "curve": None,
+        }
+        for derivation_entry in value:
+            if derivation_entry == "curves":
+                curves = 0
+                for curve in value["curves"]:
+                    if curve == "secp256k1":
+                        curves |= params.CURVE_SECP256K1
+                    elif curve == "prime256r1":
+                        curves |= params.CURVE_PRIME256R1
+                    elif curve == "ed25519":
+                        curves |= params.CURVE_ED25519
+                    elif curve == "bls12381g1":
+                        curves |= params.CURVE_BLS12381G1
+                    derivation_paths["curve"] = curves
+            elif derivation_entry == "paths":
+                derivation_paths["paths"] = value["paths"]
+        return derivation_paths

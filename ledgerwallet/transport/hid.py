@@ -1,13 +1,11 @@
-import os
-if os.getenv("LEDGERWALLET_HIDRAW", "").lower() in ["1", "true"]:
-    import hidraw as hid
-else:
-    import hid
+import hid
+
+from .device import Device
 
 LEDGER_VENDOR_ID = 0x2C97
 
 
-class HidDevice(object):
+class HidDevice(Device):
     def __init__(self, path):
         self.path = path
         self.device = None
@@ -33,7 +31,7 @@ class HidDevice(object):
         self.device.set_nonblocking(True)
         self.opened = True
 
-    def write(self, data):
+    def write(self, data: bytes):
         # data is prefixed by its size
         data_to_send = int.to_bytes(len(data), 2, "big") + data
         offset = 0
@@ -47,7 +45,7 @@ class HidDevice(object):
             offset += 64 - len(header)
             seq_idx += 1
 
-    def read(self, timeout: int) -> bytes:
+    def read(self, timeout: int = 1000) -> bytes:
         seq_idx = 0
 
         self.device.set_nonblocking(False)
@@ -68,16 +66,13 @@ class HidDevice(object):
         data = data[:data_len]
         return data
 
-    def exchange(self, data: bytes, timeout=1000):
+    def exchange(self, data: bytes, timeout: int = 1000):
         self.write(data)
-        return self.read(timeout)
+        return self.read(timeout=timeout)
 
     def close(self):
         if self.opened:
-            try:
-                self.device.close()
-            except:
-                pass
+            self.device.close()
         self.opened = False
 
 

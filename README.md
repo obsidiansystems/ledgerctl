@@ -3,10 +3,10 @@
 A Python library to control Ledger devices
 
 ## Install
- 
+
 This package provides ledgerwallet, a library to interact with Ledger devices, and ledgerctl, a command line tool based on that library to easily perform operations on the devices.
 
-Supported devices are Ledger Blue, Ledger Nano S and Ledger Nano X.
+Supported devices are Ledger Blue, Ledger Nano S, Ledger Nano X and Ledger Nano S Plus.
 
 ### Quick install
 
@@ -23,11 +23,26 @@ Under a Debian or Ubuntu based system, compiling HIDAPI requires to install addi
 sudo apt install python3-dev libusb-1.0-0-dev libudev-dev
 ```
 
+### Install from source
+
+```shell
+git clone https://github.com/LedgerHQ/ledgerctl.git
+pip3 install --upgrade protobuf setuptools ecdsa
+cd ledgerctl
+pip install -e .
+```
+
 ### Device configuration
+
+> **ATTENTION:** This step is optional and only advised for **developers**. It
+> will allow the installation of apps, that weren't reviewed by Ledger, without
+> user interaction.
 
 You should install a custom certificate authority (CA) on the device to make the usage of ledgerctl easier. This certificate is used to establish a custom secure channel between the computer and the device, and identifies ledgerctl as a "trusted manager" on the device.
 
-To install a custom CA, boot the device in "Recovery" mode, by pressing the right button at boot time. Then run:
+To install a custom CA, boot the device in "Recovery" mode by pressing the right button at boot time.
+There are no visual indicators of recovery mode.
+Then run:
 
 ```shell
 ledgerctl install-ca <NAME>
@@ -86,21 +101,25 @@ python3 -m ledgerblue.loadApp --curve secp256k1 --tlv --targetId 0x31100004 --ta
 To install it with ledgerctl:
 
 1. Retrieve `dataSize` using the above one-liner.
-2. Create a manifest file app.json in the ledger-app-btc directory:
+2. Create a manifest file app.toml in the ledger-app-btc directory:
 
-```json
-{
-    "name": "Bitcoin",
-    "version": "1.3.13",
-    "icon": "nanos_app_bitcoin.gif",
-    "targetId": "0x31100004",
-    "flags": "0xA50",
-    "derivationPath": {
-        "curves": ["secp256k1"]
-    },
-    "binary": "bin/app.hex",
-    "dataSize": 64
-}
+```toml
+name = "Bitcoin"
+version = "1.3.13"
+
+[0x31100004] #NanoS
+icon = "nanos_app_bitcoin.gif"
+flags = "0xA50"
+derivationPath = {curves = ["secp256k1"]}
+binary = "bin/app.hex"
+dataSize = 64
+
+[0x33100004] #NanoSP
+icon = "nanosp_app_bitcoin.gif"
+flags = "0xA50"
+derivationPath = {curves = ["secp256k1"]}
+binary = "bin/app_nanosp.hex"
+dataSize = 64
 ```
 
 3. Install with `ledgerctl install app.json`.
@@ -115,4 +134,25 @@ Communication between the host and the device use Application Protocol Data Unit
 $ ledgerctl -v run Bitcoin
 => e0d8000007426974636f696e
 <= 9000
+```
+
+## Contributing
+
+### Pre-commit checks
+
+> **Note:** It's advised to install `pre-commit` using
+> [`pipx`](https://github.com/pypa/pipx)
+
+Before submitting your pull-request, please make sure that all
+[pre-commit](https://pre-commit.com/) hooks are passing. They can be locally
+installed with the following command:
+
+```console
+pre-commit install
+```
+
+And executed with:
+
+```console
+pre-commit run --all-files
 ```

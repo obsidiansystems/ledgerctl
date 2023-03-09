@@ -40,7 +40,7 @@ class Asn1Length(Construct):
         encoded_len = stream_read(stream, num_bytes, path)
         num = 0
         for len_byte in encoded_len:
-            num = num << 8 + len_byte
+            num = (num << 8) + len_byte
         return num
 
     def _build(self, obj, stream, context, path):
@@ -154,9 +154,11 @@ def main():
             {"type_": "BOLOS_TAG_APPVERSION", "value": "0.0.4"},
             {
                 "type_": "BOLOS_TAG_ICON",
-                "value": b"\x01\x00\x00\x00\x00\xFF\xFF\xFF\x00\x00\x18\xFC\x24\x02"
-                b"\x24\x0A\x24\x1A\x7E\x32\x66\x62\x6E\x62\x7E\x32\x00\x1A"
-                b"\x40\x0A\x5F\x02\x5F\x02\x40\x02\x40\xFE\x7F\x00\x00",
+                "value": (
+                    b"\x01\x00\x00\x00\x00\xFF\xFF\xFF\x00\x00\x18\xFC\x24\x02"
+                    b"\x24\x0A\x24\x1A\x7E\x32\x66\x62\x6E\x62\x7E\x32\x00\x1A"
+                    b"\x40\x0A\x5F\x02\x5F\x02\x40\x02\x40\xFE\x7F\x00\x00"
+                ),
             },
             {
                 "type_": "BOLOS_TAG_DERIVEPATH",

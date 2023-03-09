@@ -41,6 +41,7 @@ class LedgerIns(enum.IntEnum):
     VALIDATE_CERTIFICATE = 0x51
     GET_CERTIFICATE = 0x52
     MUTUAL_AUTHENTICATE = 0x53
+    ONBOARD = 0xD0
     RUN_APP = 0xD8
     # Commands for custom endorsement
     ENDORSE_SET_START = 0xC0
@@ -262,7 +263,7 @@ class LedgerClient(object):
             if len(certificate) == 0:
                 break
             client_chain.append(certificate)
-        server.send_certicate_chain(client_chain)
+        server.send_certificate_chain(client_chain)
 
         # Mutual authentication done, retrieve shared secret
         self.apdu_exchange(LedgerIns.MUTUAL_AUTHENTICATE)
@@ -278,7 +279,7 @@ class LedgerClient(object):
         )
 
         load_size = min(end_addr - start_addr - offset, MAX_CHUNK_SIZE)
-        # max_load_size = 0xf0 - LOAD_SEGMENT_CHUNK_HEADER_LENGTH - MIN_PADDING_LENGTH - SCP_MAC_LENGTH
+        # max_load_size = 0xf0 - LOAD_SEGMENT_CHUNK_HEADER_LENGTH - MIN_PADDING_LENGTH - SCP_MAC_LENGTH # noqa
         max_load_size = 0x80
 
         load_address = start_addr + offset
@@ -300,21 +301,38 @@ class LedgerClient(object):
             self._load_chunk(hex_file, segment, offset)
 
     def install_app(self, app_manifest: AppManifest):
-        hex_file = IntelHex(app_manifest.get_binary())
+        version_info = self.get_version_info()
+        device = str(version_info.target_id)
+
+        app_manifest.assert_compatible_device(version_info.target_id)
+
+        hex_file = IntelHex(app_manifest.get_binary(device))
         code_length = hex_file.maxaddr() - hex_file.minaddr() + 1
-        data_length = app_manifest.data_size
+        data_length = app_manifest.data_size(device)
 
         code_length -= data_length
         assert code_length % 64 == 0  # code length must be aligned
 
-        flags = app_manifest.get_application_flags()  # not handled yet
+        flags = app_manifest.get_application_flags(device)  # not handled yet
 
-        params = app_manifest.serialize_parameters()
+        params = app_manifest.serialize_parameters(device)
         main_address = hex_file.start_addr["EIP"] - hex_file.minaddr()
 
-        data = struct.pack(
-            ">IIIII", code_length, data_length, len(params), flags, main_address
-        )
+        level = app_manifest.get_api_level(device)
+        if level:
+            data = struct.pack(
+                ">BIIIII",
+                level,
+                code_length,
+                data_length,
+                len(params),
+                flags,
+                main_address,
+            )
+        else:
+            data = struct.pack(
+                ">IIIII", code_length, data_length, len(params), flags, main_address
+            )
         self.apdu_secure_exchange(LedgerSecureIns.CREATE_APP, data)
 
         hex_file.puts(hex_file.maxaddr() + 1, params)

@@ -1,3 +1,5 @@
+from typing import Optional
+
 import requests
 
 from ledgerwallet.hsmscript import HsmScript
@@ -13,11 +15,11 @@ class HsmServer(LedgerServer):
         self.url = url
         self.script = script
 
-        self.device_nonce = None
-        self.server_nonce = None
+        self.device_nonce: Optional[bytes] = None
+        self.server_nonce: Optional[bytes] = None
 
-        self.public_key = None
-        self.last_request_id = None
+        self.public_key: Optional[bytes] = None
+        self.last_request_id: Optional[bytes] = None
         self.session = requests.Session()
 
     @staticmethod
@@ -32,7 +34,7 @@ class HsmServer(LedgerServer):
             reference=self.script.name, largeStack=self.script.use_large_stack
         )
         if self.last_request_id is not None:
-            request.id = self.last_request_id
+            request.id = self.last_request_id.decode()
 
         if params:
             for param, value in params.items():
@@ -49,7 +51,7 @@ class HsmServer(LedgerServer):
         # TODO: handle errors
         response.ParseFromString(req.content)
 
-        self.last_request_id = response.id
+        self.last_request_id = response.id.encode() if response.id else b""
         if len(response.exception) != 0:
             raise Exception(f"HSM Error: {response.exception}")
         return response.response
@@ -71,6 +73,6 @@ class HsmServer(LedgerServer):
         public_key = self.public_key
         return [serialize(public_key) + serialize(server_signature)]
 
-    def send_certicate_chain(self, chain):
+    def send_certificate_chain(self, chain):
         for certificate in chain:
             self.query(certificate)

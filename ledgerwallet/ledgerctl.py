@@ -1,9 +1,16 @@
 import configparser
 import os
+import re
 import sys
+from json import JSONDecodeError
 
 import click
 from tabulate import tabulate
+
+if sys.version_info >= (3, 11):
+    from tomllib import TOMLDecodeError
+else:
+    from toml.decoder import TomlDecodeError as TOMLDecodeError
 
 from ledgerwallet import utils
 from ledgerwallet.client import (
@@ -11,10 +18,27 @@ from ledgerwallet.client import (
     LEDGER_HSM_URL,
     CommException,
     LedgerClient,
+    LedgerIns,
+    NoLedgerDeviceException,
 )
-from ledgerwallet.client import NoLedgerDeviceException
 from ledgerwallet.crypto.ecc import PrivateKey
 from ledgerwallet.manifest import AppManifest
+from ledgerwallet.manifest_json import AppManifestJson
+from ledgerwallet.manifest_toml import AppManifestToml
+
+
+class ManifestFormatError(Exception):
+    def __init__(
+        self, toml_error: TOMLDecodeError, json_error: JSONDecodeError
+    ) -> None:
+        self.toml = toml_error
+        self.json = json_error
+
+    def __str__(self) -> str:
+        return "TOML or JSON is expected\nTOML error : {}\nJSON error : {}".format(
+            self.toml, self.json
+        )
+
 
 _remote_options = [
     click.option("--url", type=str, default=LEDGER_HSM_URL, help="Server URL."),
@@ -111,7 +135,8 @@ def list_apps(get_client, remote, url, key):
     client = get_client()
     rows = []
 
-    # Always list apps using a remote server on Nano X, as custom SCP channels cannot be established
+    # Always list apps using a remote server on Nano X, as custom SCP channels
+    # cannot be established
     if client.target_id == 0x33000004:
         remote = True
     for app in client.list_apps_remote(url, key) if remote else client.apps:
@@ -140,10 +165,22 @@ def list_apps(get_client, remote, url, key):
 @click.pass_obj
 def install_app(get_client, manifest: AppManifest, force):
     client = get_client()
-    app_manifest = AppManifest(manifest)
+    try:
+        app_manifest: AppManifest = AppManifestToml(manifest)
+    except TOMLDecodeError as toml_error:
+        try:
+            app_manifest = AppManifestJson(manifest)
+            click.echo(
+                "[WARNING] JSON files will be deprecated in future version", err=True
+            )
+        except JSONDecodeError as json_error:
+            raise ManifestFormatError(toml_error, json_error)
+
     try:
         if force:
             client.delete_app(app_manifest.app_name)
+            client.close()
+            client = get_client()
         client.install_app(app_manifest)
     except CommException as e:
         if e.sw == 0x6985:
@@ -230,6 +267,8 @@ def install_ca(get_client, name, public_key):
             click.echo("A certificate is already installed on the device.")
         elif e.sw == 0x6802:  # INVALID_PARAMETER
             click.echo("The provided certificate is invalid.")
+        elif e.sw == 0x661E:
+            click.echo("The device is not in recovery mode.")
         else:
             raise
 
@@ -249,7 +288,8 @@ def delete_ca(get_client):
             raise
 
 
-# Taken from https://web.archive.org/web/20111010015624/http://blogmag.net/blog/read/38/Print_human_readable_file_size
+# Taken from
+# https://web.archive.org/web/20111010015624/http://blogmag.net/blog/read/38/Print_human_readable_file_size
 def sizeof_fmt(num, suffix="B"):
     for unit in ("", "K", "M"):
         if abs(num) < 1024.0:
@@ -312,6 +352,40 @@ def info(get_client):
 def upgrade_firmware(get_client, firmware_name, firmware_key, url, key):
     client = get_client()
     client.upgrade_firmware(firmware_name, firmware_key, url, key)
+
+
+@cli.command(
+    help="Perform quick onboarding from command line. Device must be reset and booted in recovery mode (press some buttons during the boot)."  # noqa
+)
+@click.argument("pin")
+@click.argument("words")
+@click.option(
+    "--id", help="Identity number to initialize", default=0, type=click.IntRange(0, 2)
+)
+@click.option("--prefix", help="Derivation prefix")
+@click.option("--passphrase", help="Derivation passphrase")
+@click.pass_obj
+def onboard(connect, pin, passphrase, words, id, prefix):
+    # Check pin argument
+    if not re.match("^[0-9]{4,8}$", pin):
+        raise ValueError("Invalid PIN format")
+
+    data = bytearray()
+    for string in (pin, prefix, passphrase, words):
+        if string:
+            as_bytes = string.encode()
+            data.append(len(as_bytes))
+            data += as_bytes
+        else:
+            data.append(0)
+
+    client = connect()
+    try:
+        client.apdu_exchange(LedgerIns.ONBOARD, data, p1=id)
+    except CommException as e:
+        raise RuntimeError(
+            "Onboarding failed (are you in recovery mode?): {:#x}".format(e.sw)
+        )
 
 
 if __name__ == "__main__":
